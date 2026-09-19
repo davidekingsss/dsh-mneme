@@ -1,7 +1,7 @@
 # dsh-mneme 语义增强架构 — 设计文档
 
 - **日期**：2026-08-15
-- **状态**：进行中（分支 `feat/local-semantic`）
+- **状态**：✅ 已实现（本地 Embedding / Rerank / 聚类随 v0.2+ 落地；本文档转为历史设计存档，当前能力以 [README](../README.md) 正文为准）
 - **范围**：为 dsh-mneme 增加"完全离线的语义记忆引擎"，覆盖本地 Embedding、Rerank 精排、autoDream 向量聚类三个阶段
 - **相关文档**：[本地模型部署指南](LOCAL_MODEL.md) · [从 v0.1 升级说明](MIGRATION.md)
 

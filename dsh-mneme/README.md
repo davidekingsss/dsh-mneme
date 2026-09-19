@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/@modusensus/dsh-mneme?color=blue&label=npm)](https://www.npmjs.com/package/@modusensus/dsh-mneme)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Awesome](https://awesome-dsh-plugin.com/badge.svg)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
-[![tests](https://img.shields.io/badge/tests-1079%20passed-success)](https://github.com/modusensus/dsh-mneme)
+[![tests](https://img.shields.io/badge/tests-1160%20passed-success)](https://github.com/modusensus/dsh-mneme)
 [![CI](https://img.shields.io/github/actions/workflow/status/modusensus/dsh-mneme/ci.yml)](https://github.com/modusensus/dsh-mneme/actions)
 [![node](https://img.shields.io/badge/node-22%2B-blue)](https://nodejs.org)
 [![npm downloads](https://img.shields.io/npm/d18m/@modusensus/dsh-mneme.svg?color=blue&label=downloads)](https://www.npmjs.com/package/@modusensus/dsh-mneme)
@@ -85,15 +85,9 @@ dsh web
 
 #### dreamMaxTokens 调优指南
 
-默认 `32768` 已为思考型模型预留推理+正文的双重预算（部分思考型模型仅推理就可能消耗 8k+ token）。当**记忆量大**（数万字符以上）时按规模继续调大：
+默认 `131072`（即上限，#135）已为思考型模型预留推理+正文的双重预算（部分思考型模型仅推理就可能消耗 8k+ token），常规记忆库无需调整。若**记忆量大**（数万字符以上）且正文仍被截断，优先按下方「巩固模型分类声明」换非思考模型 / 配 `dreamReasoningEffort` 压低思考，再考虑调大输入侧上限（如 `distillMaxChars`）——`dreamMaxTokens` 本身已无上调空间。
 
-| 记忆库规模 | 建议 `dreamMaxTokens` |
-|-----------|----------------------|
-| 常规（<1 万字） | `32768`（默认） |
-| 中等（1 万-5 万字） | `65536` |
-| 大型（5 万字以上） | `131072`（上限） |
-
-> 若使用**思考型模型**（如 deepseek-v4-flash / DeepSeek-R1 类），模型可能把全部预算花在 reasoning 上导致正文为空（日志出现 `no json array in llm output`）。#135 修复后：未配置 `dreamReasoningEffort` 时会**自动取模型支持的最低档**发流（不再省略字段让模型自带默认档——v4-flash 系默认 high——顶上烧光预算），默认配置即生效；显式 `none` = 不发送字段用服务商默认，`off`/`low`/`medium`/`high` 原样传递，模型不支持的档位自动换用（拒绝原因记入 llm_audit）。正文仍为空时再调大 `dreamMaxTokens`（默认已抬至 131072）或配置 `dreamProvider`/`dreamModel` 指向非思考模型。sleep 侧对应 `sleepReasoningEffort`。
+> 若使用**思考型模型**（如 deepseek-v4-flash / DeepSeek-R1 类），模型可能把全部预算花在 reasoning 上导致正文为空（日志出现 `no json array in llm output`）。#135 修复后：未配置 `dreamReasoningEffort` 时会**自动取模型支持的最低档**发流（不再省略字段让模型自带默认档——v4-flash 系默认 high——顶上烧光预算），默认配置即生效；显式 `none` = 不发送字段用服务商默认，`off`/`low`/`medium`/`high` 原样传递，模型不支持的档位自动换用（拒绝原因记入 llm_audit）。正文仍为空时配置 `dreamProvider`/`dreamModel` 指向非思考模型（`dreamMaxTokens` 默认已是上限 131072，无上调空间）。sleep 侧对应 `sleepReasoningEffort`。
 
 **巩固模型分类声明**（settings panel「巩固模型」= `dreamProvider`/`dreamModel`，睡眠侧对应 `sleepProvider`/`sleepModel`）：
 
@@ -214,13 +208,25 @@ v0.3.0 起新增**记忆基因**层：从记忆里抽取**命名实体**、**带
 
 图谱 ↔ 记忆双向互跳：图谱详情侧的关联记忆可点击，记忆边的「来源记忆」按 memory_id 直跳三栏视图并自动定位。
 
-### 三路召回融合与会话热记忆 🔎（v0.5.0）
+### 四路召回融合与会话热记忆 🔎（v0.5.0，v0.8.4 扩四路）
 
 - **BM25 稀疏第三路召回**（`src/search/bm25.js`）：与向量召回、FTS5/LIKE 关键词并列——ASCII 词元 + CJK bigram 分词、IDF 加权（归一化 [0,1]），专有名词 / ID / 代码片段等散词查询不再依赖子串命中。融合规则：未召回行按 `0.3×BM25分` 回填；仅向量召回行获得词法加分；LIKE 已命中行不叠分。`bm25SearchEnabled` 可关
+- **实体图召回轴（第四路，v0.8.4）**（`entityRecallEnabled` 默认关）：开启后检索融合池三源扩四源——store 新增 `findEntitiesMentionedIn` / `getLinkedMemoryIds` 反查原语 + `idx_relations_memory` 索引，命中实体所在记忆按边入池，fuseRecall 的 blend / rrf / minmax 全配方参与；实体轴与 BM25 同为确认/回填信号（we 并入 wb 共用 0.3 回填权重），永不主导语义排序，失败降级空数组；keyword 模式纯文本路径不吃实体轴
 - **自适应阈值**（`src/search/adaptive.js`）：取代固定 `0.65` 截断——`entity:`/`attr:` 前缀放宽 0.5，短查询（<5 字符）收紧 0.7，长查询（>50）放宽 0.6，Top1/Top5 分差 > 0.3 时放宽让尾部进 Rerank；显式传 `threshold` 或 `adaptiveThresholdEnabled=false` 走旧行为
 - **会话级短期热记忆**（`src/hot-memory.js`）：最近 N 轮对话（默认 5 轮，`hotMemoryRounds`）按 token 预算（默认 2000，`hotMemoryMaxTokens`）滚动截断，从会话事件日志无状态重建、不落库；注入顺序为「短期上下文 → 长期记忆召回 → 摘要」
 - **选择性注入**：query 向量可用时注入候选按主题相似度重排（`selectiveInjectEnabled` 可关）；**搜索时语义去重**为激进选项（`searchSemanticDedup=true` 显式开启，近重复行 Rerank 前丢弃）
 - **召回基准**（`scripts/benchmark-recall.js`）：标准查询集驱动，计算 Recall@5 与 MRR，`legacy`（三特性全关）vs `fused`（默认配置）双跑对比
+
+### v0.8.4 批次：记忆生态化 + 检索增强 + 蒸馏可靠性 🚀
+
+- **stdio MCP server**（#181/#214）：插件自带零依赖 stdio MCP server，任意 MCP 客户端（Claude Code / Cursor 等）挂载即得记忆六件套，见下方 [MCP Server](#mcp-server任意-mcp-客户端接入)
+- **图召回轴**（#219/#222，`entityRecallEnabled`）：实体挂联记忆并入检索融合池，见上方「四路召回融合」
+- **冷启动**（#220/#223）：`POST /bootstrap` 从仓库目录反向构建初始记忆——零 LLM、幂等、必有产出，新仓库起步不再从空记忆开始
+- **注入截断上限可配**（#164①/#225，`injectContentMaxChars`）：截断不再静默——尾部带上限/原长/全文 `memory_get` 指引，agent 永远拿得到全文路径
+- **dream 总览常驻状态条 + 叙述条**（#164/#227/#228）：常驻注入升级为「当前状态」叙述 + 快照口径脚注；`dreamNarrativeEnabled` 开启后按主题簇合成叙述条并附 evidence 证据链
+- **记忆复用统计卡 / 注入状态卡**（#182/#217）：状态页新增「记忆复用」卡（Top-N 召回 / 僵尸记忆率 / 覆盖度）与极简模式注入状态提示卡
+- **路由旧值显式标记**（#191/#213）：切 Provider 后残留的旧 model id 带「（不在可用列表）」标记 + ⚠ 行级提示，不再与正常选项无差别
+- **heat 广义指数衰减**（#218，`heatGlobalBeta`）：幂律换 `H=exp(-λ·Δt^β)`，β 可调衰减形状
 
 ## 🆕 最近版本亮点
 
@@ -228,9 +234,10 @@ v0.3.0 起新增**记忆基因**层：从记忆里抽取**命名实体**、**带
 
 | 版本 | 亮点 |
 |------|------|
-| **v0.8.1** | 归属显式声明与人工纠偏 + 插件版本自检：记忆归属三段式可控——per-dim 来源列 + save/update scope 参数 + 面板可编辑（#170 第 1 步，#171）；sleep 跨 scope 相似对停车进冲突队列人工裁决（第 2 步，#172）；`strictScope` 硬过滤只认显式声明、自动标注降为纯软加权（第 3 步，#173，4.3 已确认）；`GET /api/dsh-mneme/version-check` 只读路由 + 设置页偏差横幅（仅 outdated 渲染，registry 精确 host 白名单 + TTL 缓存 + 全失败静默，pnpm 钉子警示 + 市场收录延迟说明，#174 后续）；1026 测试全绿 |
-| **v0.8.2** | 生态与性能批次（社区贡献集中合入）：LLM 消息补 source 契约——严格 provider 下 dream/summarize/sleep/实体抽取不再序列化抛错（#189/#190）；memory_get 输出 schema 与共享 DTO 同源（#184/#186）；sleep 计时器撞 CD 重排 + 构造挂表（#187/#192）；单 logit 重排器恒 0.5 修复 + 镜像/量化接线（#188/#193）；连通性探测改发 user 消息（#197）；首轮注入 BM25 同步兜底——老偏好不再占满槽位（#198/#199）；autoDream 宽容路径闭环——coverage 不足降级 degraded + archive 类型护栏/批量上限 `dreamMaxArchivePerRun`（#104/#200/#201）；检索路径性能第一批——updated_at 索引 + all() 剪列 + 向量解析缓存（#202/#203，all() 231→51ms、searchVector ~140→16ms）；standalone API 补 profile/rules 路由（#180/#185）；1061 测试全绿 |
+| **v0.8.4** | MCP 六件套 + 图召回轴 + 冷启动 + 注入截断/状态条 + 蒸馏可靠性批次：stdio MCP server 让记忆六件套进任意 MCP 客户端——零依赖（JSON-RPC 2.0 换行帧，不引 SDK），工具面与 `src/tools.js` 逐字对齐、平价回归锁漂移，配置沿用 CLI 约定（#181/#214）；图召回轴 `entityRecallEnabled`——检索融合池三源扩四源，实体挂联记忆参与 blend/rrf/minmax，与 BM25 同为确认/回填信号（#219/#222）；冷启动 `src/bootstrap.js` 从仓库文件反向构建初始记忆——零 LLM 必有产出、幂等，`POST /bootstrap`（#220/#223）；注入截断上限可配 `injectContentMaxChars` + 截断尾部带全文 `memory_get` 指引（#164①/#225）；dream 总览升级常驻状态条 + 叙述条 `dreamNarrativeEnabled`（#164/#227/#228）；记忆复用统计卡 / 注入状态卡 / 路由旧值显式标记（#182/#217/#191/#213）；heat 幂律换广义指数 `heatGlobalBeta`（#218）；修复 reasoningEffort 连通性透传、summarize 增量蒸馏 + 子会话交付补齐（#215/#226/#232）；1160 测试全绿 |
 | **v0.8.3** | 注入轮换与下载可靠性批次：注入位跨轮轮换 `injectRotationTurns`（默认 0 = 关）——同一会话相邻轮次不再反复注入同一条，窗口只看之前轮次、同查询工具轮不推进不转自己（sessionId 分桶 FIFO 32，#205/#206）；候选池四处扩容 `poolSize = maxItems × (轮换窗口 + 1)`（下限 200），旋钮开多大、池子就够多大（#208）；模型文件下载断点续传与重试 `resilientModelDownload`（默认开）——Range / If-Range 续传、416 / 偏移失配重置、单写者锁 + 降级直通 + 空闲看门狗（#194/#207）；1079 测试全绿 |
+| **v0.8.2** | 生态与性能批次（社区贡献集中合入）：LLM 消息补 source 契约——严格 provider 下 dream/summarize/sleep/实体抽取不再序列化抛错（#189/#190）；memory_get 输出 schema 与共享 DTO 同源（#184/#186）；sleep 计时器撞 CD 重排 + 构造挂表（#187/#192）；单 logit 重排器恒 0.5 修复 + 镜像/量化接线（#188/#193）；连通性探测改发 user 消息（#197）；首轮注入 BM25 同步兜底——老偏好不再占满槽位（#198/#199）；autoDream 宽容路径闭环——coverage 不足降级 degraded + archive 类型护栏/批量上限 `dreamMaxArchivePerRun`（#104/#200/#201）；检索路径性能第一批——updated_at 索引 + all() 剪列 + 向量解析缓存（#202/#203，all() 231→51ms、searchVector ~140→16ms）；standalone API 补 profile/rules 路由（#180/#185）；1061 测试全绿 |
+| **v0.8.1** | 归属显式声明与人工纠偏 + 插件版本自检：记忆归属三段式可控——per-dim 来源列 + save/update scope 参数 + 面板可编辑（#170 第 1 步，#171）；sleep 跨 scope 相似对停车进冲突队列人工裁决（第 2 步，#172）；`strictScope` 硬过滤只认显式声明、自动标注降为纯软加权（第 3 步，#173，4.3 已确认）；`GET /api/dsh-mneme/version-check` 只读路由 + 设置页偏差横幅（仅 outdated 渲染，registry 精确 host 白名单 + TTL 缓存 + 全失败静默，pnpm 钉子警示 + 市场收录延迟说明，#174 后续）；1026 测试全绿 |
 | **v0.8.0** | 作用域隔离（issue #17 批次 A）+ 冲突集中处理 + 斜杠命令提交 Agent + 注入转义回归修复：记忆按 agent 与工作区双维标注（agent_scope / workspace_scope / sensitivity / occurred_at 四列可空），检索按当前会话作用域加权（命中 ×1.25、他 scope ×0.5 保留可见），opt-in `strictScope` 硬过滤贯通检索/注入/列表/单取（fail-closed）；`scopeEnabled` / `strictScope` 默认关、面板「作用域隔离」组可启停；去重键扩展含作用域三元——跨作用域同标题不再物理合并；`occurred_at` 事件发生时间 + `occurred_from/to` 过滤贯通搜索与列表；冲突冻结（conflictFreezeEnabled）新增人工出口——状态页冲突队列并排对比 + 保留 A/B/仅标记（#166）；斜杠命令经 agent.followup 真正提交模型（#152）；恢复 v0.7.4 的注入花括号转义 + hot memory 跳过 reasoning——`{{.Server.Version}}` 类文本不再卡死会话（#165）；988 测试全绿 |
 | **v0.7.32** | 冲突动作集扩展 + 运行时自管化 + 记忆/提示语言 + 候选集 hybrid 档 + 一批修复：`sleepActionSet` 新增 `full` 档（supersede/differentiate/update/merge/conflict/keep 六分支，默认 `conflict` 零行为变化）——supersede 赢家正文干净、输家归档附「已被取代」注记，differentiate 双留+差异注记；sleep 校验接入 `dreamSkipInvalid` 宽容策略（默认 true，一票否决变宽容，严格可关）；运行时三档取件（收编/本地 .tgz/registry）+ transformers 转可选 peer（#131）；`memory.language`（zh/en）提示/注入/镜像语言可选（#124）；summarize 节流 + 产出上限 + 同会话去重（#127）；inject 正文读取修复（#129）、#135 五连修（前缀解析/effort 最低档/importance 豁免/ready 语义/覆盖度降级告警）、boot 回填指纹短路修复（#128）、degraded 轮跳过明细落库（#104）；916 测试全绿、总覆盖 92.7%（runtime 96%、embedding 100%） |
 | **v0.7.30** | 状态页向量卡修复（issue #118）：改读开放的 `/semantic`——不再吃 `/vector-config` 的 401「加载失败」，ollama/local 模式不再恒显「未启用」；新增「初始化中（embedder 不可达，正在重试）」与「已索引 N / M 条」回填进度显示；legacy OpenAI 兼容 embedder「Object · 0D」显示修复（embedder 显式 `name: "OpenAI"` + 维度回退 `index.dimension`）；「已索引 N / M」分子分母同口径（`embeddedCount` 剔除归档/遗忘，与 `count()` 默认过滤对齐）；embedder init 失败有界重试（共 5 次，不再一次性永久降级，unload 清理定时器）+ `OllamaEmbedder.ready` 生命周期位 + `/semantic` 新增 `ready` 字段；745 测试全绿 |
@@ -342,6 +349,8 @@ v0.3.0 起新增**记忆基因**层：从记忆里抽取**命名实体**、**带
 | **v0.8.2** | ✅ 完成 | 生态与性能批次：宽容路径闭环 + 检索提速 + 社区贡献集中合入 | autoDream 宽容路径三方向闭环：coverage 不足降级 degraded、archive 类型护栏 + `dreamMaxArchivePerRun` 批量上限、失败审计明细贯通（#104/#200/#201）；检索路径三处固定成本：updated_at 索引 + all() 剪列 + 向量解析缓存，all() 231→51ms、searchVector ~140→16ms（#202/#203）；LLM 消息补 source 契约（#189/#190）；首轮注入 BM25 同步兜底（#198/#199）；memory_get schema 同源（#184/#186）；sleep CD 重排（#187/#192）；单 logit 重排器修复（#188/#193）；standalone profile/rules 路由（#180/#185）；1061 测试全绿 |
 | **v0.8.3** | ✅ 完成 | 注入轮换 + 模型下载可靠性 | `injectRotationTurns` 跨轮轮换（默认 0 = 关）——相邻轮次注入去重，窗口只看之前轮次、同查询工具轮不推进不转自己；候选池四处扩容 `poolSize = maxItems × (窗口+1)` 配套，轮换越得出窗口（#205/#206/#208，Philia-FY 报告 + A/B + 池子盲区定位）；`resilientModelDownload` 断点续传与重试（默认开）——Range 续传 / 失配重置 / 单写者锁 + 降级直通 / 空闲看门狗（#194/#207，heptaspirit）；1079 测试全绿 |
 
+| **v0.8.4** | ✅ 完成 | MCP 六件套 + 图召回轴 + 冷启动 + 注入截断/状态条 + 蒸馏可靠性 | stdio MCP server 让记忆六件套进任意 MCP 客户端——零依赖（JSON-RPC 2.0 换行帧，不引 SDK）、工具面与 `src/tools.js` 逐字对齐、平价回归锁漂移，配置沿用 CLI 约定（#181/#214）；图召回轴 `entityRecallEnabled`——检索融合池三源扩四源，实体挂联记忆参与 blend/rrf/minmax，与 BM25 同为确认/回填信号（#219/#222）；冷启动 `src/bootstrap.js` 从仓库文件反向构建初始记忆——零 LLM 必有产出、幂等，`POST /bootstrap`（#220/#223）；注入截断上限可配 `injectContentMaxChars` + 截断尾部带全文 `memory_get` 指引（#164①/#225）；dream 总览常驻状态条 + 叙述条 `dreamNarrativeEnabled`（#164/#227/#228）；记忆复用统计卡 / 注入状态卡 / 路由旧值显式标记（#182/#217/#191/#213）；heat 广义指数 `heatGlobalBeta`（#218）；reasoningEffort 连通性透传 + summarize 增量蒸馏与子会话交付（#215/#226/#232）；1160 测试全绿 |
+
 > 新能力一律做成**可开关的功能**（配置启用/关闭），默认保守开启、不破坏现有行为。`failure_memories` 表与 autoDream 决策引擎已为后续反思性成长铺好路。
 
 ## 📦 安装
@@ -405,21 +414,44 @@ dsh web
 | `autoInject` | `true` | 会话启动自动注入记忆 |
 | `autoSummarize` | `true` | 会话结束自动提炼摘要 |
 | `summarizeProvider` / `summarizeModel` | 空 | 摘要的 LLM 路由覆盖（空=使用当前会话模型）；推荐轻量模型节省主模型 token |
+| `summarizeMinIntervalMinutes` | `0` | autoSummarize 最小触发间隔（0-10080，0=不限）：两次蒸馏之间最短间隔，失败/degraded run 也占用（#127） |
+| `summarizeMaxEntriesPerRun` | `0` | 单次蒸馏产出记忆条数上限（0-50，0=不限）：节流防单会话大量重复条目（#127） |
+| `summarizeDedupeMode` | `off` | 落库前去重档位：`off`（默认=现状）/ `title`（零成本，仅拦完全同名）/ `vector`（复用 embedding 列做同会话语义近邻，无 LLM 调用，#127） |
+| `summarizeDedupeMinSim` | `0.92` | vector 去重档的相似度阈值（0.5-0.99） |
+| `summarizeDedupeWindowHours` | `24` | vector 去重的同会话时间窗（小时，0-168） |
+| `distillMaxChars` | `24000` | 蒸馏输入的正文截断上限（1000-200000）：防止单轮转录把 LLM 输入撑爆 |
+| `distillRateLimitIntervalMs` | `1000` | 蒸馏 LLM 调用全局串行队列的最小间隔（ms，0-60000，429 保护默认开） |
+| `distillRateLimitRetries` | `3` | 命中 429 限流时的指数退避重试次数（0-10） |
+| `distillRateLimitBaseDelayMs` | `1000` | 429 退避基准延迟（ms）：1s→2s→4s… |
 | `maxInjectedItems` | `5` | 最多注入几条记忆 |
 | `injectRotationTurns` | `0` | 注入位跨轮轮换：同一条记忆在最近 N 个查询轮次注入过后本轮不再优先（新鲜优先、不足回填，槽位数不变；会话边界自动重置；`0` = 关闭保持现状） |
+| `injectContentMaxChars` | `300` | 注入单条正文截断上限（60-4000，原硬编码 300，#164①/#225）：截断尾部带上限/原长/全文 `memory_get` 指引；块预算 `Math.max(1500, 上限+600)` 随上限放大 |
 | `importanceThreshold` | `3` | 注入的最低重要性（1-5） |
 | `autoDream` | `true` | 自动记忆整理开关 |
 | `dreamThresholdCount` | `10` | 触发整理的记忆条数阈值 |
 | `dreamThresholdChars` | `5000` | 触发整理的总字符阈值 |
 | `dreamDelayMs` | `2000` | 整理异步延迟（去抖） |
 | `dreamProvider` / `dreamModel` | 空 | dream 的 LLM 路由覆盖（显式配置优先于 agent 默认模型；留空则回退到 agent 默认模型） |
-| `dreamMaxTokens` | `32768` | dream LLM 调用最大 token 数（上限 131072；思考型模型的 reasoning 与正文共享该预算，正文为空时优先调大，见下方调优指南） |
-| `dreamReasoningEffort` | `none` | dream LLM 推理强度透传：`low` / `medium` / `high` / `none`（`none`=不传该字段，沿用模型默认；思考型模型（如 deepseek-v4-flash）想压低思考可设 `low`；v0.7.26+ 模型不支持配置档位时自动换用其支持的默认/首个档位，无 reasoning 能力的型号省略字段） |
+| `dreamMaxTokens` | `131072` | dream LLM 调用最大 token 数（上限 131072；#135 起默认即上限——思考型模型的 reasoning 与正文共享该预算，正文仍为空时优先换非思考模型或调 `dreamProvider`/`dreamModel`，见下方调优指南） |
+| `dreamReasoningEffort` | 未配置=最低档 | dream LLM 推理强度透传：`off` / `low` / `medium` / `high` / `none`（未配置 = 自动取模型支持的最低档，避免思考模型用自带默认档烧光预算；`none`=不传该字段、用服务商自带默认；v0.7.26+ 模型不支持配置档位时自动换用其支持的默认/首个档位，无 reasoning 能力的型号省略字段） |
 | `dreamCandidateMode` | `window` | dream 候选集构造：`window`（只取最近 `dreamMaxSnapshotSize` 条）/ `hybrid`（在此基础上并入向量翻出的高相似组）。纯时间窗口下，实测 45 对「双方活跃且 sim≥0.85」里 0 对能同时进窗口——该合并的一对几乎永远碰不到面。**已知边界**：dream 侧动作集仍是五分支（keep / merge / archive / update / conflict），hybrid 翻出的互补型 / 演进型对在 dream 里没有 `differentiate` / `supersede` 出口；正确出口在 sleep 侧（`sleepActionSet: full`）|
 | `dreamCandidateMax` | `0` | hybrid 的候选总量上限；`0` = 复用 `dreamMaxSnapshotSize`。候选总量与库总量解耦，输入成本不随库增长 |
 | `dreamCandidateMinSim` | `0.85` | hybrid 判「高相似」的阈值（与 sleep 的 normal 档对齐，两个模块共用同一个「高相似」定义） |
 | `dreamMaxArchivePerRun` | `8` | 单轮 archive 决策上限（超限整单拒绝，防一次性大扫除；正常清理可调高） |
+| `dreamSkipInvalid` | `true` | 单条非法决策跳过 + 合法子集应用 + run 记 degraded（#89）；`false` 恢复严格模式整单拒绝 |
+| `allowCrossTypeMerge` | `false` | 显式放宽跨类型合并（默认关，类型边界由用户承担）；跨类型意图的正确出口是 `sleepActionSet: full` |
+| `dreamImplicitKeep` | `true` | 显式决策覆盖率不足时的隐式 keep（未提及条目保持原样）；`false` + `dreamMinExplicitCoverage: 0` 恢复旧严格行为 |
+| `dreamMinExplicitCoverage` | `0.5` | 显式决策覆盖率下限（0-1）：合法子集低于该值降级 degraded 而非整单拒绝（#104 方向 1，PR #200） |
+| `dreamMaxSnapshotSize` | `200` | autoDream 滑动窗口上限：每次只对最近 N 条做 consolidation，窗口外不进 snapshot（防 LLM 输入撑爆） |
+| `dreamMinIntervalMinutes` | `0` | autoDream 最小触发间隔（0-10080，0=不限）：失败/degraded run 也占用 |
+| `dreamNarrativeEnabled` | `false` | 叙述条总开关（#164 对齐，v0.8.4）：按共享 tag 主题簇合成叙述 + evidence 证据链，注入候选排除（按需检索，常驻位只留 dream 总览）；也走 feature_flags 白名单，lightMode 强制关 |
+| `dreamNarrativeMinCluster` | `3` | 主题簇合成叙述的最小成员数（2-20，v0.8.4） |
 | `apiToken` | 空 | 可选 API 鉴权 token；设置后写操作与密钥接口要求 `Authorization: Bearer <apiToken>` |
+| `externalApiEnabled` | `false` | 独立 HTTP API 服务开关（v0.7.12）：开 standalone API（CLI 依赖它） |
+| `externalApiHost` | `127.0.0.1` | standalone API 监听地址 |
+| `externalApiPort` | `8790` | standalone API 监听端口 |
+| `lightMode` | `false` | 轻量模式（v0.7.12）：关闭所有重型增强（语义/实体/叙述/heat 等，见 feature_flags 白名单），纯存储+注入 |
+| `policyEpoch` | `0` | 冲突裁决规则版本：bump 后旧 dream_runs 降级为历史证据（receipt 不再驱动实时裁决） |
 | `embedProvider` | `openai` | 语义后端：`openai`（默认，兼容 v0.1）/ `local`（ONNX 离线）/ `ollama` |
 | `localEmbedModel` | `Xenova/bge-small-zh-v1.5` | 本地 ONNX embedding 模型 |
 | `localEmbedDimension` | `512` | 本地 embedding 向量维度 |
@@ -429,10 +461,16 @@ dsh web
 | `ollamaModel` | `nomic-embed-text` | Ollama embedding 模型 |
 | `embedModelCacheDir` | 空 | 模型缓存目录（空 = 用户级 `~/.dsh/mneme/models`） |
 | `embedModelMirror` | `https://hf-mirror.com` | 模型下载镜像源 |
+| `resilientModelDownload` | `true` | 模型文件下载断点续传与重试（v0.8.3，#194/#207）：Range/If-Range 续传、416/偏移失配重置、单写者锁+降级直通、空闲看门狗；`false` 恢复 env.fetch 原样 |
+| `runtimeDir` | 空 | 自管运行时目录（#131）：空 = `~/.dsh/mneme/runtime`，放收编/下载的 transformers+onnxruntime 闭包（不留宿主 profile 依赖图） |
+| `runtimeTarballDir` | 空 | 运行时离线取件：本地 `.tgz` 目录（如 onnxruntime-node 网络下不到时 `npm pack` 丢进去），有则优先于联网 |
+| `runtimeMirror` | 空 | 运行时 registry 镜像前缀（如 `https://npmmirror.com/mirrors/npm/`）；留空用 runtime-manifest.json 官方地址 |
 | `vectorSearchTopK` | `20` | 向量搜索返回 Top-K |
 | `vectorSearchThreshold` | `0.65` | 向量搜索相似度阈值 |
 | `hybridSearchVectorWeight` | `0.6` | 混合搜索向量权重 |
 | `hybridSearchKeywordWeight` | `0.4` | 混合搜索关键词权重 |
+| `recallFusion` | `blend` | 召回融合配方：`blend`（默认，加权求和）/ `rrf`（Reciprocal Rank Fusion）/ `minmax`（min-max 归一化加权）——后两者按 rank/尺度感知融合，修复原始分数单位不匹配 |
+| `signalTransparency` | `false` | 给每条检索结果附加 `signals` 对象（{keyword, vector, bm25, final}）便于调试；只装饰不改排序 |
 | `rerankEnabled` | `false` | 是否启用 Rerank 精排（显式开启才加载本地 onnxruntime 模型） |
 | `rerankProvider` | `none` | Rerank 后端：`local` / `none`（默认 `none`） |
 | `rerankModel` | `Xenova/bge-reranker-base` | Rerank 交叉编码模型 |
@@ -444,9 +482,15 @@ dsh web
 | `reflectionFailureTracking` | `true` | 失败追踪总开关 |
 | `reflectionUpdateMaxPerRun` | `2` | 每次整理最多 update 数 |
 | `reflectionUpdateMinAgeHours` | `24` | 新建记忆保护期（小时） |
+| `codingRetrospect` | `false` | 编码记忆蒸馏（v0.7.13，默认关）：完整转录提炼编码原子记忆（rejected_solution/pitfall/constraint 三类型） |
+| `codingKeywords` | 内置词表 | 编码任务识别词表（读取侧门控）：命中即视为编码类任务，编码记忆才注入 |
+| `codingBoostFactor` | `2` | 编码记忆注入排序的 boost 倍数（1-5） |
 | `entityExtractionEnabled` | `false` | 实体抽取总开关（v0.3.0；存储层恒可用） |
 | `entityExtractionModel` | 空 | 抽取专用模型（空 = 用 agent 默认模型） |
+| `entityExtractionProvider` | 空 | 抽取专用模型服务商（空 = 用 agent 默认 provider/model，v0.7.29） |
+| `entityExtractionReasoning` | 未配置=最低档 | 实体抽取推理档位（同 dreamReasoningEffort 语义，v0.7.29）：被模型拒绝时自动去 effort 重试 |
 | `entityExtractionMaxEntities` | `10` | 每次抽取实体数上限 |
+| `entityRecallEnabled` | `false` | 图召回轴（v0.8.4，#219）：实体挂联记忆并入检索融合池（三源扩四源，blend/rrf/minmax 全配方参与）；依赖实体抽取产出，也走 feature_flags 白名单，lightMode 强制关 |
 | `entityExtractionMaxAttrs` | `20` | 每实体属性数上限 |
 | `entitySearchEnabled` | `true` | `entity:` / `attr:` 前缀搜索开关 |
 | `trustEpistemicWeighting` | `false` | 记忆可信度加权（v0.4.5，opt-in 默认关）：记忆按来源分级 `observation`> `inferred` > `subjective`，开启后检索排序优先高可信记忆、注入对 observation 标注 `[verified]`、dream merge/conflict 偏向高可信一方；关闭时 `epistemic_status` 仅随保存落库、不参与行为 |
@@ -460,6 +504,18 @@ dsh web
 | `heatGlobalBeta` | `1.0` | 广义指数形状参数 β（`H=exp(-λ·Δt^β)`，issue #218 拍板）：β=1 纯指数；以 Δt>1 小时为准，β<1 衰减更慢（亚线性长尾）、β>1 衰减更快（超线性）；0<Δt<1 的首小时内方向相反（Δt^β 随 β 增大而变小） |
 | `heatTypeDecay` | 内置 TYPE_DECAY | per-type 衰减因子 λ；λ=0 的类型免疫（preference/pattern/summary 热度恒 1.0，sleep 永不降级） |
 | `sleepHeatThreshold` | `0.05` | sleep 降级联合判定热度下限：heat<该值 **且** importance<5 才允许降级 |
+| `sleepModeEnabled` | `false` | Sleep Mode 总开关（v0.4.0，opt-in）：会话空闲 `sleepIdleMinutes` 后触发深维护（巩固/降级/模式发现），与 autoDream 串行不重叠 |
+| `sleepIdleMinutes` | `5` | 触发 sleep 的空闲窗口（分钟，1-60） |
+| `sleepMinIntervalHours` | `8` | 两次 sleep 最小间隔（小时，1-168）：间隔内再次空闲不重复触发 |
+| `sleepConflictStrictness` | `normal` | 冲突裁决严格度：`gentle`（高置信，阈值 0.92）/ `normal`（标准，0.85）/ `aggressive`（低置信也裁决，0.75） |
+| `sleepActionSet` | `conflict` | sleep 冲突阶段动作集：`conflict`（默认=现状，只用 conflict/keep，后台流程不静默扩张）/ `full`（六分支 merge/update/supersede/differentiate/conflict/keep，#126） |
+| `sleepArchiveDays` | `30` | 降级分层一：N 天未访问 → 缩为摘要（正文进 `_full_content`） |
+| `sleepCompressDays` | `90` | 降级分层二：N 天未访问 → 直接归档（实体关系保留） |
+| `sleepPatternMinMemories` | `100` | 模式发现扫描窗口（最近 N 条记忆，10-1000） |
+| `sleepPatternLookbackDays` | `30` | 模式发现回看实体属性变更的天数（1-90） |
+| `sleepMaxPatternPerRun` | `3` | 每轮模式记忆产出上限（0=禁用，0-10） |
+| `sleepProvider` / `sleepModel` | 空 | sleep 深维护专用 LLM 路由覆盖（留空用巩固模型或当前模型；建议同巩固模型选非思考模型） |
+| `sleepReasoningEffort` | 未配置=最低档 | sleep 各阶段 LLM 推理档位（同 dreamReasoningEffort 语义，v0.7.26） |
 | `recallRecordDefault` | `true` | recall_runs 记录默认开（显式传 `recordRecall:false` 的调用方不受影响） |
 | `recallRetentionDays` | `90` | recall_runs 滚动清理保留天数 |
 | `hotMemoryRounds` | `5` | 会话级短期热记忆轮次（v0.5.0）：最近 N 轮对话滚动注入，从会话事件日志无状态重建、不落库 |
@@ -472,6 +528,7 @@ dsh web
 | `scopeEnabled` | `false` | 作用域隔离总开关（v0.8.0，issue #17）：memory_save 按会话身份写入 agent / workspace 标注（agentPreset / 工作区路径，registry 反查取不到回退 header.cwd，再取不到 NULL）；去重键扩展含作用域三元——跨作用域同标题不再物理合并；检索按当前会话作用域加权（命中 ×1.25、他 scope ×0.5 保留可见）。也走 feature_flags 白名单（面板可启停） |
 | `strictScope` | `false` | 作用域硬过滤（v0.8.0 引入，v0.8.1 起只认显式声明；依赖 `scopeEnabled`）：检索 / 注入 / 列表 / 单取四路过滤，**显式声明**收窄到他者作用域的记忆完全不可见；载体自动标注只降权保留可见——真正的物理隔离请用 sensitivity。会话身份解析不到时 fail-closed 只挡显式行。关闭时全部为软隔离（降权保留可见）。也走 feature_flags 白名单 |
 | `conflictFreezeEnabled` | `false` | 冲突冻结（v0.4.4）：dream 发现矛盾对不自动裁决，冻结进冲突队列；状态页「冲突队列」支持并排对比与人工确认（保留 A / 保留 B / 仅标记已处理，v0.8.0） |
+| `conflictFreezeMaxPending` | `100` | 冲突冻结队列最大挂起数（1-1000）：超出后不再入队（防队列无限膨胀） |
 | `escapePromptVariables` | `true` | 注入文本花括号转义（v0.8.0 恢复，issue #162）：注入边界把 `{{...}}` 转义，防止 hot memory / 记忆原文里的 Go template / Vue 语法触发宿主 interpolate 抛错卡死会话（v0.7.4 曾修复、v0.7.11 误删） |
 
 > 🔐 **API 安全**：DSH 无内置鉴权且默认仅监听 `127.0.0.1`。插件 API 默认开放（便于 Web 面板即装即用）。如需防护（如局域网暴露），在配置中设置 `apiToken`：写操作（画像/规则/命令）与密钥端点（`vector-config`、`vector-reindex`）需携带 `Authorization: Bearer <token>`（前端设置面板可填入同一 token），只读的 `list` / `search` / `semantic` 保持开放。`/api/dsh-mneme/vector-config` 返回的 `apiKey` 已掩码（`sk-***…`），存储仍保留明文供调用；前端回传空或掩码值表示"不改 key"。
@@ -503,6 +560,7 @@ dsh web
 | `PUT` | `/memories/:id` | 局部更新 `{title?,content?,type?,importance?,tags?,reason?,agent_scope?,workspace_scope?}`；content 改写按 human_override 入档 |
 | `DELETE` | `/memories/:id` | 删除记忆 |
 | `GET` | `/search?q&mode=keyword\|vector\|hybrid\|auto&topK&occurred_from&occurred_to` | 搜索（关键词 / 向量 / hybrid=向量领位关键词补位 / 自动） |
+| `POST` | `/bootstrap` | 冷启动（v0.8.4）：从仓库目录反向构建初始记忆，body `{dir}` 必填；幂等（(type,title,scope) 去重 + `_overwrite` 原地刷新），零 LLM、必有产出 |
 
 ### curl 示例
 
@@ -584,7 +642,7 @@ Claude Code 挂载示例（项目根 `.mcp.json`；token 在面板「设置 → 
 │  服务层：saveWithDedupe / injectCandidates        │
 │         / mergeHumanEdits / onWrite 钩子          │
 ├─────────────────────────────────────────────────┤
-│  模型接口：8 个工具 + 自动注入 + 会话摘要          │
+│  模型接口：9 个工具 + 自动注入 + 会话摘要          │
 ├─────────────────────────────────────────────────┤
 │  autoDream：阈值调度 → LLM 决策清单               │
 │            → 校验（fail-safe）→ 应用 → 摘要       │
@@ -618,8 +676,8 @@ src/
 ├── api.js            # HTTP 路由（Web 面板数据通道，含 /conflicts 冲突队列）
 └── index.js          # 插件接线
 lib/                  # src 的同步分发产物（npm run sync；发布前由 root prepack 的 check-sync.js 校验一致性；唯一手写例外 lib/client.js——Web 面板 bundle，sync 不覆盖）
-test/                 # 988 个 node:test 测试（审计与三轴线压测不变量；src↔lib 一致性由 scripts/check-sync.js 发布闸门校验）
-scripts/              # e2e-dsh.js 端到端演示 · stress-dsh.js 三轴线压测 · sync-lib.js 同步 · check-sync.js 发布闸门 · benchmark-recall.js 召回基准 · release-prep.mjs 发布准备
+test/                 # 1160 个 node:test 测试（审计与三轴线压测不变量；src↔lib 一致性由 scripts/check-sync.js 发布闸门校验）
+scripts/              # e2e-dsh.js 端到端演示 · stress-dsh.js 三轴线压测 · sync-lib.js 同步 · check-sync.js 发布闸门 · benchmark-recall.js / benchmark-embed.js / benchmark-rerank.js 基准 · sync-test-badge.mjs 测试徽章 · build-runtime-manifest.mjs 运行时清单
 ```
 
 ## 🧪 开发
@@ -627,7 +685,7 @@ scripts/              # e2e-dsh.js 端到端演示 · stress-dsh.js 三轴线压
 ```bash
 cd dsh-mneme
 npm install        # 安装 peer 依赖（以 devDependencies 形式，用于本地测试）
-npm test           # 运行 1026 个测试
+npm test           # 运行 1160 个测试
 npm run stress     # 三轴线压测：长会话检索 / 冲突仲裁 / 多 Agent 并发（离线 mock LLM）
 npm run sync       # 把 src/ 同步到 lib/（发布时由 prepack 钩子自动执行）
 ```

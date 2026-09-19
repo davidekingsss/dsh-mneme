@@ -14,13 +14,12 @@
 
 ## Repository Layout
 
-The repository root is the publishing manifest; the actual plugin code lives in the `dsh-mneme/` subdirectory:
+The repository root is a documentation listing; the actual plugin code (and the npm package) lives in the `dsh-mneme/` subdirectory:
 
 ```
-dsh-mneme-1/
-├── package.json          # npm publishing manifest (main → dsh-mneme/lib/index.js)
-├── README.md / CHANGELOG.md / SECURITY.md
-└── dsh-mneme/            # the plugin itself
+dsh-mneme-repo/           # repo root (docs only, no package.json)
+├── README.md / CHANGELOG.md / SECURITY.md / CONTRIBUTING.md
+└── dsh-mneme/            # the plugin itself (npm package dir, publish entry)
     ├── src/              # source (ESM) — all feature work happens here
     ├── lib/              # build output; DSH actually loads lib/index.js
     ├── scripts/          # sync-lib.js, check-sync.js, e2e-dsh.js, stress-dsh.js, benchmark-*
@@ -34,7 +33,7 @@ dsh-mneme-1/
 
 - Write code only in `src/`, then run `npm run sync` to mirror changes into `lib/`.
 - **Never edit `lib/` by hand** — the next sync overwrites it.
-- Publish from the **repo root**: root `prepack` runs `scripts/check-sync.js`, which asserts `src/` ↔ `lib/` match file-for-file and fails the publish on any drift (issue #65). So run `npm run sync` (in `dsh-mneme/`) and commit the `lib/` changes **before** publishing.
+- Publish from inside `dsh-mneme/` — the **package directory** (per AGENTS.md red line: the repo root historically shipped broken packages and now has no package.json). `prepack` runs `scripts/check-sync.js`, which asserts `src/` ↔ `lib/` match file-for-file and fails the publish on any drift (issue #65). So run `npm run sync` (in `dsh-mneme/`) and commit the `lib/` changes **before** publishing.
 
 ---
 
@@ -143,11 +142,11 @@ Bug-fix PRs for existing desktop compatibility issues are still welcome.
 Versioning follows semantic versioning (`MAJOR.MINOR.PATCH`). Full flow:
 
 1. **Update CHANGELOG**: add a version entry (`## [X.Y.Z] - date`, split into 「修复 / 新增 / 测试」) at the top of `dsh-mneme/CHANGELOG.md`; update the root `CHANGELOG.md` if it tracks the same.
-2. **Bump version**: change `version` in `dsh-mneme/package.json` and `package-lock.json`; the root `package.json` is synced automatically by the `prepublishOnly` hook — no manual edit.
+2. **Bump version**: change `version` in `dsh-mneme/package.json` and `package-lock.json`.
 3. **Full test pass**: `npm test` must be green.
 4. **Commit and push**: commit → `git push origin main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z`.
 5. **Create a GitHub Release**: title `vX.Y.Z`, body referencing the matching CHANGELOG entry (review before publishing).
-6. **Publish to npm**: run `npm publish` from the **repository root** (`prepublishOnly` copies the version from `dsh-mneme/package.json` into the root `package.json`; `prepack` runs `scripts/check-sync.js` and fails if `src/` ↔ `lib/` drifted — ensure `npm run sync` + commit ran first).
+6. **Publish to npm**: run `npm publish` from inside `dsh-mneme/` — the **package directory** (per AGENTS.md red line; the repository root has no package.json). `prepack` runs `scripts/check-sync.js` and fails if `src/` ↔ `lib/` drifted — ensure `npm run sync` + commit ran first.
 
 ---
 
@@ -222,10 +221,9 @@ Every report meeting the minimums gets code-level verification and a reply. Issu
 仓库根目录是发布清单，实际插件代码在 `dsh-mneme/` 子目录：
 
 ```
-dsh-mneme-1/
-├── package.json          # npm 包发布清单（main 指向 dsh-mneme/lib/index.js）
-├── README.md / CHANGELOG.md / SECURITY.md
-└── dsh-mneme/            # 插件本体
+dsh-mneme-repo/           # 仓库根（仅文档清单，无 package.json）
+├── README.md / CHANGELOG.md / SECURITY.md / CONTRIBUTING.md
+└── dsh-mneme/            # 插件本体（npm 包目录，发布入口）
     ├── src/              # 源码（ESM），所有功能都在这里开发
     ├── lib/              # 构建产物，DSH 实际加载的是 lib/index.js
     ├── scripts/          # sync-lib.js、check-sync.js、e2e-dsh.js、stress-dsh.js、benchmark-*
@@ -239,7 +237,7 @@ dsh-mneme-1/
 
 - 所有代码改动只写 `src/`，改完必须运行 `npm run sync` 同步到 `lib/`。
 - **不要手工编辑 `lib/`**——下次 sync 会覆盖你的改动。
-- 发布在**仓库根**执行：root `prepack` 会跑 `scripts/check-sync.js`，逐文件断言 `src/` ↔ `lib/` 一致，有漂移直接发布失败（issue #65 教训）。所以发布前务必先在 `dsh-mneme/` 里跑 `npm run sync` 并把 `lib/` 改动一起提交。
+- 发布在 **`dsh-mneme/` 包目录内**执行（AGENTS.md 红线：仓库根历史上发出过坏包，根目录现已无 package.json）：`prepack` 会跑 `scripts/check-sync.js`，逐文件断言 `src/` ↔ `lib/` 一致，有漂移直接发布失败（issue #65 教训）。所以发布前务必先在 `dsh-mneme/` 里跑 `npm run sync` 并把 `lib/` 改动一起提交。
 
 ---
 
@@ -336,11 +334,11 @@ DSH 上游仍处于 developer preview 阶段，API 与服务接口变动频繁�
 版本号遵循语义化版本（`MAJOR.MINOR.PATCH`）。完整流程：
 
 1. **更新 CHANGELOG**：在 `dsh-mneme/CHANGELOG.md` 顶部新增版本条目（`## [X.Y.Z] - 日期`，分「修复 / 新增 / 测试」小节），根目录 `CHANGELOG.md` 如涉及同步更新。
-2. **更新版本号**：改 `dsh-mneme/package.json` 的 `version` 与 `package-lock.json`；根目录 `package.json` 由 `prepublishOnly` 钩子自动同步，无需手改。
+2. **更新版本号**：改 `dsh-mneme/package.json` 的 `version` 与 `package-lock.json`（根目录无 package.json，勿臆造）。
 3. **全量测试**：`npm test` 确认通过。
 4. **提交并推送**：commit → `git push origin main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z`。
 5. **创建 GitHub Release**：标题为 `vX.Y.Z`，正文引用 CHANGELOG 对应条目（发布前需人工过目）。
-6. **发布 npm**：在**仓库根目录**执行 `npm publish`（`prepublishOnly` 会自动把 `dsh-mneme/package.json` 的版本号写入根 `package.json`，`prepack` 会跑 `scripts/check-sync.js` 校验 src↔lib 一致性，漂移则发布失败——发布前须先 `npm run sync` 并提交 `lib/` 改动）。
+6. **发布 npm**：在 **`dsh-mneme/` 包目录内**执行 `npm publish`（AGENTS.md 红线：仓库根历史上发出过坏包，根目录现无 package.json）。`prepack` 会跑 `scripts/check-sync.js` 校验 src↔lib 一致性，漂移则发布失败——发布前须先 `npm run sync` 并提交 `lib/` 改动。
 
 ---
 
