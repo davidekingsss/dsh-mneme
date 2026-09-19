@@ -87,7 +87,7 @@ dsh web
 
 默认 `131072`（即上限，#135）已为思考型模型预留推理+正文的双重预算（部分思考型模型仅推理就可能消耗 8k+ token），常规记忆库无需调整。若**记忆量大**（数万字符以上）且正文仍被截断，优先按下方「巩固模型分类声明」换非思考模型 / 配 `dreamReasoningEffort` 压低思考，再考虑调大输入侧上限（如 `distillMaxChars`）——`dreamMaxTokens` 本身已无上调空间。
 
-> 若使用**思考型模型**（如 deepseek-v4-flash / DeepSeek-R1 类），模型可能把全部预算花在 reasoning 上导致正文为空（日志出现 `no json array in llm output`）。#135 修复后：未配置 `dreamReasoningEffort` 时会**自动取模型支持的最低档**发流（不再省略字段让模型自带默认档——v4-flash 系默认 high——顶上烧光预算），默认配置即生效；显式 `none` = 不发送字段用服务商默认，`off`/`low`/`medium`/`high` 原样传递，模型不支持的档位自动换用（拒绝原因记入 llm_audit）。正文仍为空时再调大 `dreamMaxTokens`（默认已抬至 131072）或配置 `dreamProvider`/`dreamModel` 指向非思考模型。sleep 侧对应 `sleepReasoningEffort`。
+> 若使用**思考型模型**（如 deepseek-v4-flash / DeepSeek-R1 类），模型可能把全部预算花在 reasoning 上导致正文为空（日志出现 `no json array in llm output`）。#135 修复后：未配置 `dreamReasoningEffort` 时会**自动取模型支持的最低档**发流（不再省略字段让模型自带默认档——v4-flash 系默认 high——顶上烧光预算），默认配置即生效；显式 `none` = 不发送字段用服务商默认，`off`/`low`/`medium`/`high` 原样传递，模型不支持的档位自动换用（拒绝原因记入 llm_audit）。正文仍为空时配置 `dreamProvider`/`dreamModel` 指向非思考模型（`dreamMaxTokens` 默认已是上限 131072，无上调空间）。sleep 侧对应 `sleepReasoningEffort`。
 
 **巩固模型分类声明**（settings panel「巩固模型」= `dreamProvider`/`dreamModel`，睡眠侧对应 `sleepProvider`/`sleepModel`）：
 

@@ -14,13 +14,12 @@
 
 ## Repository Layout
 
-The repository root is the publishing manifest; the actual plugin code lives in the `dsh-mneme/` subdirectory:
+The repository root is a documentation listing; the actual plugin code (and the npm package) lives in the `dsh-mneme/` subdirectory:
 
 ```
-dsh-mneme-1/
-├── package.json          # npm publishing manifest (main → dsh-mneme/lib/index.js)
-├── README.md / CHANGELOG.md / SECURITY.md
-└── dsh-mneme/            # the plugin itself
+dsh-mneme-repo/           # repo root (docs only, no package.json)
+├── README.md / CHANGELOG.md / SECURITY.md / CONTRIBUTING.md
+└── dsh-mneme/            # the plugin itself (npm package dir, publish entry)
     ├── src/              # source (ESM) — all feature work happens here
     ├── lib/              # build output; DSH actually loads lib/index.js
     ├── scripts/          # sync-lib.js, check-sync.js, e2e-dsh.js, stress-dsh.js, benchmark-*
@@ -34,7 +33,7 @@ dsh-mneme-1/
 
 - Write code only in `src/`, then run `npm run sync` to mirror changes into `lib/`.
 - **Never edit `lib/` by hand** — the next sync overwrites it.
-- Publish from the **repo root**: root `prepack` runs `scripts/check-sync.js`, which asserts `src/` ↔ `lib/` match file-for-file and fails the publish on any drift (issue #65). So run `npm run sync` (in `dsh-mneme/`) and commit the `lib/` changes **before** publishing.
+- Publish from inside `dsh-mneme/` — the **package directory** (per AGENTS.md red line: the repo root historically shipped broken packages and now has no package.json). `prepack` runs `scripts/check-sync.js`, which asserts `src/` ↔ `lib/` match file-for-file and fails the publish on any drift (issue #65). So run `npm run sync` (in `dsh-mneme/`) and commit the `lib/` changes **before** publishing.
 
 ---
 
