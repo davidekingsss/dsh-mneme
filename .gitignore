@@ -36,3 +36,6 @@ memory.db
 
 # workbuddy workspace data
 .workbuddy/
+
+# 并行工作区车道（git worktree add .worktrees/<lane>）：见 AGENTS.md
+.worktrees/

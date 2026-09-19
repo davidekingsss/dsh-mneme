@@ -13,6 +13,19 @@ dsh-mneme 是 DSH 宿主的记忆插件（蒸馏 / 注入 / 检索 / 巩固 / sc
   - `scripts/` — 同步、徽章、基准与压测脚本
 - 仓库根 — README（双语）、CHANGELOG、CONTRIBUTING、docs/
 
+## 并行工作区与多 agent 协作
+
+本仓库的开发常由多个 agent / 多个终端并行推进。**并行时一条硬规则：一个工作进程一棵树**，不共用同一个工作目录；单人串行开发不受影响。
+
+- 用 `git worktree add .worktrees/<lane> -b <branch>` 开独立车道；`.worktrees/` 已忽略，**检索、清点、批量替换一律排除它**，否则会数出两份副本；
+- 车道内的 `node_modules` 可以软链到主树那份（Windows 用 junction），省下重复安装：**任一侧 `npm install` 前先确认另一侧没在跑测试**；
+- `lib/` 是 sync 产物（见上）：各自树内同步，`npm run sync` **只在准备提交前跑一次**，别当保存键用；
+- 共享资源同一时刻只有一个写入者：`npm install`、`npm publish` / `scripts/release-prep.mjs`（且只在 `dsh-mneme/` 内执行）、插件 relink——**被 link 的那棵树才是「活」的**；
+- 不 `amend` / force-push 别人的提交，不把别人未提交的改动 `stash` 走；
+- **提交不得有 AI 署名**（无 `Co-Authored-By`、无 "Generated with"）——见 [CONTRIBUTING](CONTRIBUTING.md)；
+- **本机私有信息不进公开文件**：车道分配、端口占用、记忆库路径这类只对某台机器成立的东西，放不进库的本地板（`.worktrees/coordination.md`）或 `.git/info/exclude`；本文件只放对所有人都成立的纪律（定位见开头：薄入口）；
+- 两个宿主都加载本插件时：`memoryDir` 可共用（`src/store.js` 的 `busy_timeout` + WAL 已为多进程就绪），但 `externalApiEnabled`（默认端口 8790）与 `autoDream` 后台任务**只能一边开**，否则 EADDRINUSE + 重复做梦（镜像/审计双写）。
+
 ## 模块地图（按功能面）
 
 | 功能面 | 文件 | 一句话 |
