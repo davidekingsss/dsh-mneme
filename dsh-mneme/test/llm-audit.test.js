@@ -195,6 +195,114 @@ test("autoSummarize writes an llm_audit_logs row (trigger_source autoSummarize)"
   store.close();
 });
 
+// --- token 记账：用量嵌在 chunk.usage 下 -------------------------------------
+// 真实 dsh-llm 协议的用量形状是 { type:"usage", usage: TokenUsage }（TokenUsage
+// = { inputTokens, outputTokens, … }），chunk 顶层没有 token 字段。把整个 chunk
+// 当用量对象读取会让 input/output 恒为 undefined，审计行落 0：本机实测 7 天 49
+// 次 success 调用 total_tokens 全 0，面板「LLM 消耗」永远显示 0。下面三例锁住
+// 真实形状，并保留用量平铺在顶层的兼容分支。
+
+/** 在 base ctx 的流末尾（finish 之前）插入一个 usage chunk。 */
+function withUsageChunk(base, usageChunk) {
+  return {
+    ...base,
+    llm: {
+      async *stream(options) {
+        for await (const chunk of base.llm.stream(options)) {
+          if (chunk.type === "finish") yield usageChunk;
+          yield chunk;
+        }
+      }
+    }
+  };
+}
+
+/** consolidation 决策：全部 keep，保证 run 成功且无需解析语义。 */
+const keepAllDecisions = (listText) => {
+  const ids = [...listText.matchAll(/id=([^\s|]+)\s*\|\s*type=\w+\s*\|\s*importance=\d+/g)].map((m) => m[1]);
+  return JSON.stringify(ids.map((id) => ({ action: "keep", ids: [id] })));
+};
+
+test("autoDream records tokens from the nested usage chunk (chunk.usage)", async () => {
+  const { store, service, config } = dreamSetup();
+  service.saveWithDedupe({ type: "project", title: "旧1", content: "第一段内容" });
+  const ctx = withUsageChunk(
+    mockCtx({ onConsolidation: keepAllDecisions }),
+    { type: "usage", usage: { inputTokens: 1200, outputTokens: 300, totalTokens: 1500 } }
+  );
+  const dream = createDreamScheduler({ thresholdCount: 1, thresholdChars: 0, delayMs: 0 });
+  const result = await dream.runDream(ctx, service, config);
+  assert.equal(result.ok, true);
+
+  const rows = service.listLlmAudits();
+  const consolidate = rows.find((r) => r.operation_type === "dream_consolidate");
+  assert.equal(consolidate.input_tokens, 1200, "input tokens come from chunk.usage");
+  assert.equal(consolidate.output_tokens, 300, "output tokens come from chunk.usage");
+  assert.equal(consolidate.total_tokens, 1500);
+  const summary = rows.find((r) => r.operation_type === "dream_summarize");
+  assert.equal(summary.total_tokens, 1500, "the dream summary call is accounted too");
+  store.close();
+});
+
+test("autoSummarize records tokens from the nested usage chunk (chunk.usage)", async () => {
+  const store = createStore(":memory:");
+  const service = createService({ store, mirror: null, config: {} });
+  const events = [];
+  const ctx = withUsageChunk({
+    on(name, fn) {
+      events.push({ name, fn });
+      return () => {};
+    },
+    logger: { warn: () => {} },
+    llm: {
+      async *stream() {
+        yield { type: "text-delta", index: 0, text: JSON.stringify([
+          { type: "decision", title: "选型", content: "确定用 node:sqlite", importance: 4 }
+        ]) };
+        yield { type: "finish", reason: { kind: "stop" } };
+      }
+    }
+  }, { type: "usage", usage: { inputTokens: 800, outputTokens: 200, totalTokens: 1000 } });
+  const config = {
+    autoSummarize: true,
+    summarizeProvider: "deepseek",
+    summarizeModel: "deepseek-chat",
+    llmAudit: { enabled: true }
+  };
+  createSummarizer(ctx, service, config);
+  const handler = events.find((e) => e.name === "session/event").fn;
+  const session = {
+    id: "s1",
+    requestHeader: () => ({ config: {} }),
+    events: [
+      { type: "user/message", data: { source: { kind: "user" }, content: [{ type: "text", text: "帮我选型" }] } },
+      { seq: 2, type: "turn/end" }
+    ]
+  };
+  await handler(session, { seq: 2, type: "turn/end" });
+
+  const rows = service.listLlmAudits();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].input_tokens, 800, "input tokens come from chunk.usage");
+  assert.equal(rows[0].output_tokens, 200, "output tokens come from chunk.usage");
+  assert.equal(rows[0].total_tokens, 1000);
+  store.close();
+});
+
+test("flat top-level usage shape still records tokens", async () => {
+  const { store, service, config } = dreamSetup();
+  service.saveWithDedupe({ type: "project", title: "旧1", content: "第一段内容" });
+  const ctx = withUsageChunk(
+    mockCtx({ onConsolidation: keepAllDecisions }),
+    { type: "usage", inputTokens: 40, outputTokens: 10 }
+  );
+  const dream = createDreamScheduler({ thresholdCount: 1, thresholdChars: 0, delayMs: 0 });
+  await dream.runDream(ctx, service, config);
+  const consolidate = service.listLlmAudits().find((r) => r.operation_type === "dream_consolidate");
+  assert.equal(consolidate.total_tokens, 50, "flat shape is still readable");
+  store.close();
+});
+
 // --- API surface ------------------------------------------------------------
 
 class FakeRes extends EventEmitter {
