@@ -1374,7 +1374,7 @@ export function createApi(ctx, service, settings, commands, embedder, semantic =
   });
 
   return {
-    routes: 30,
+    routes: 32,
     dispose: () => {
       for (const dispose of disposers) dispose();
     }

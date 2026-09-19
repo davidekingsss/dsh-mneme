@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3E63DD?style=flat-square" alt="license"></a>
   <a href="https://github.com/modusensus/dsh-mneme/actions"><img src="https://img.shields.io/github/actions/workflow/status/modusensus/dsh-mneme/ci.yml?style=flat-square&label=CI" alt="CI"></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-22%2B-3E63DD?style=flat-square&logo=nodedotjs&logoColor=white" alt="node"></a>
-  <a href="https://github.com/modusensus/dsh-mneme"><img src="https://img.shields.io/badge/tests-1079%20passed-3E63DD?style=flat-square" alt="tests"></a>
+  <a href="https://github.com/modusensus/dsh-mneme"><img src="https://img.shields.io/badge/tests-1160%20passed-3E63DD?style=flat-square" alt="tests"></a>
   <a href="https://codecov.io/gh/modusensus/dsh-mneme"><img src="https://img.shields.io/codecov/c/github/modusensus/dsh-mneme/main?style=flat-square" alt="coverage"></a>
   <a href="https://github.com/awesome-dsh-plugin/awesome-dsh-plugin"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="Awesome"></a>
 </p>
@@ -131,11 +131,11 @@ dsh web
 
 | 文档 | 路径 |
 |------|------|
-| 插件完整文档（功能 / 安装 / 配置 / 架构） | [dsh-mneme/README.md](dsh-mneme/README.md) · [插件文档（双语）](dsh-mneme/README.md) |
+| 插件完整文档（功能 / 安装 / 配置 / 架构） | [dsh-mneme/README.md](dsh-mneme/README.md) |
 | 实体结构化设计 | [dsh-mneme/docs/ENTITIES.md](dsh-mneme/docs/ENTITIES.md) |
 | 语义架构 | [dsh-mneme/docs/SEMANTIC.md](dsh-mneme/docs/SEMANTIC.md) |
 | 本地模型部署指南 | [dsh-mneme/docs/LOCAL_MODEL.md](dsh-mneme/docs/LOCAL_MODEL.md) |
-| v0.1 迁移说明 | [dsh-mneme/docs/MIGRATION.md](dsh-mneme/docs/MIGRATION.md) |
+| v0.3 → v0.4 迁移说明（Sleep Mode） | [dsh-mneme/docs/MIGRATION.md](dsh-mneme/docs/MIGRATION.md) |
 | 版本历史 | [dsh-mneme/CHANGELOG.md](dsh-mneme/CHANGELOG.md) |
 | 安全策略 | [SECURITY.md](SECURITY.md) |
 
@@ -152,7 +152,7 @@ dsh web
 | **v0.5** | 召回融合与记忆可视化：BM25 + 图谱 + 热记忆 | ✅ |
 | **v0.6** | 会话生命周期：删对话 ≠ 删记忆 | ✅ |
 | **v0.7** | 自进化记忆：热度衰减 + 睡眠双保护 + 桌面端工作台/功能开关 | ✅ |
-| **v0.8** | 作用域隔离（agent/workspace 双维隔离 + 检索加权 + opt-in 硬过滤）+ 冲突队列人工裁决 + 斜杠命令提交 Agent + 注入转义回归修复 | ✅ 已发布 |
+| **v0.8** | 作用域隔离（agent/workspace 双维隔离 + 检索加权 + opt-in 硬过滤）+ 冲突队列人工裁决 + 归属显式声明 + 生态化（stdio MCP server / 图召回轴 / 冷启动 / 注入截断与状态条 / 蒸馏可靠性） | ✅ 已发布（至 v0.8.4） |
 
 > 完整逐小版本路线图见 [dsh-mneme/README.md](dsh-mneme/README.md#-进化路线图)。
 
@@ -160,7 +160,7 @@ dsh web
 
 ```bash
 cd dsh-mneme && npm install
-npm test        # 1026 个测试
+npm test        # 1160 个测试
 npm run stress  # 三轴线压测
 npm run sync    # src → lib 同步
 ```
@@ -291,11 +291,11 @@ It works out of the box. To feel its value in five minutes:
 
 | Doc | Path |
 |-----|------|
-| Full plugin docs (features / install / config / architecture) | [dsh-mneme/README.md](dsh-mneme/README.md) · 中文见同文件中文区 |
+| Full plugin docs (features / install / config / architecture) | [dsh-mneme/README.md](dsh-mneme/README.md)（中文） |
 | Entity structure design | [dsh-mneme/docs/ENTITIES.md](dsh-mneme/docs/ENTITIES.md) |
 | Semantic architecture | [dsh-mneme/docs/SEMANTIC.md](dsh-mneme/docs/SEMANTIC.md) |
 | Local model guide | [dsh-mneme/docs/LOCAL_MODEL.md](dsh-mneme/docs/LOCAL_MODEL.md) |
-| v0.1 migration | [dsh-mneme/docs/MIGRATION.md](dsh-mneme/docs/MIGRATION.md) |
+| v0.3 → v0.4 migration (Sleep Mode) | [dsh-mneme/docs/MIGRATION.md](dsh-mneme/docs/MIGRATION.md) |
 | Changelog | [dsh-mneme/CHANGELOG.md](dsh-mneme/CHANGELOG.md) |
 | Security | [SECURITY.md](SECURITY.md) |
 
@@ -312,7 +312,7 @@ It works out of the box. To feel its value in five minutes:
 | **v0.5** | Recall fusion & visualization: BM25 + graph + hot memory | ✅ |
 | **v0.6** | Session lifecycle: delete session ≠ delete memory | ✅ |
 | **v0.7** | Self-evolving memory: heat decay + sleep dual-protection + desktop workbench/feature toggles | ✅ |
-| **v0.8** | Scope isolation (agent/workspace stamping + retrieval weighting + opt-in hard filter) + conflict review queue + slash commands submitted to Agent + injection escaping restored | ✅ Released |
+| **v0.8** | Scope isolation (agent/workspace stamping + retrieval weighting + opt-in hard filter) + conflict review queue + explicit attribution + ecosystem (stdio MCP server / graph recall axis / cold-start bootstrap / injection truncation & status bar / distill reliability) | ✅ Released (up to v0.8.4) |
 
 > Full per-minor-version roadmap in [dsh-mneme/README.md](dsh-mneme/README.md#-evolution-roadmap).
 
@@ -320,7 +320,7 @@ It works out of the box. To feel its value in five minutes:
 
 ```bash
 cd dsh-mneme && npm install
-npm test        # 1026 tests
+npm test        # 1160 tests
 npm run stress  # three-axis stress test
 npm run sync    # src → lib sync
 ```

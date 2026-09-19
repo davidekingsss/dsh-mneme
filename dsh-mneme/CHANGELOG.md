@@ -8,6 +8,24 @@
 
 - **记忆复用统计端点与面板卡（issue #217）**：`GET /api/dsh-mneme/recall-stats?window=30`（整数天数，1-365 钳制，缺省 30）只读聚合——Top-N 召回（按窗口内 recall_runs 候选计数，join memories 补 type/source，已删记忆 type=null）、僵尸记忆率（活跃且窗口内零曝光，豁免期 7 天单独报数）、覆盖度标注（earliestRunAt / 扫描超上限 truncated）；纯读聚合独立成模块 `src/recall-stats.js`（service.js 过 2000 行参考线，barrel 出口调用方零改动）；面板状态页新增「记忆复用」卡（自门控，窗口内无回执整卡不渲染）。注入命中率与「入池未中」零召回语义（B）待注入留痕口径拍板后接入。
 - **heat 广义指数衰减 + 注入排序热度乘数（issue #218）**：衰减式由幂律 `H=1/(1+λΔt)^α` 换为广义指数 `H=exp(-λ·Δt^β)`（FadeMem v2 Eq4，维护者拍板选型；幂律在 Wixted & Ebbesen 1991 / Rubin & Wenzel 1996 / FSRS 有支持但不在 #164 论文集内，留待真实负载回放两族 A/B）；`heatGlobalAlpha` → `heatGlobalBeta`（0.5–2，默认 1.0，默认关期间零迁移成本），λ=0 免疫位语义不变；`heatEnabled` 补进面板「记忆增强」组（feature flags 白名单第三处落位，面板可启停=回滚开关）；开启后注入排序规则路在优先级层内乘 heat——同级内乘数，priority 分层与 `order=chrono` 分页序不动，关闭时排序逐字节一致；touch 回温 / sleep 热联合判定 / 前端热度投影沿用存量路径。
+- **stdio MCP server——记忆六件套进入任意 MCP 客户端（issue #181，PR #214）**：`bin/dsh-mneme-mcp.mjs` 零依赖 stdio MCP server（JSON-RPC 2.0 换行帧，不引 SDK，Node ≥ 20 全局 fetch）；工具面 memory_save / memory_search / memory_list / memory_get / memory_update / memory_delete 六件套与 `src/tools.js` 逐字对齐、平价回归测试锁漂移；配置沿用 CLI 约定（`DSH_MNEME_URL` / `DSH_MNEME_TOKEN` > `~/.dsh-mneme/cli.json` > 默认 8790）；配套 api-standalone 补齐六件套数据面（PUT /memories/:id 字段补丁、POST /memories 透传 sensitivity/occurred_at/显式 scope、GET /memories 与 /search 补 include_archived 与 occurred_from/to）。
+- **图召回轴——实体挂联记忆并入检索融合池（issue #219，PR #222）**：`entityRecallEnabled`（默认 false，feature_flags 白名单可启停，lightMode 强制关）开启后检索融合池三源扩四源——store 新增 `findEntitiesMentionedIn` / `getLinkedMemoryIds` 反查原语 + `idx_relations_memory` 索引，fuseRecall 的 blend / rrf / minmax 全配方参与；实体轴与 BM25 同为确认/回填信号（we 并入 wb 后共用 0.3 回填权重），永不主导语义排序，失败降级空数组；keyword 模式契约不变（纯文本路径不吃实体轴）。
+- **冷启动——从仓库文件反向构建初始记忆（issue #220，PR #223）**：`src/bootstrap.js` 确定性解析、零 LLM 必有产出——package.json scripts / README 概览 / CONTRIBUTING 规范 / CI 工作流清单 / 顶层目录树（跳过产物目录），git 仓库追加近期提交主题（execFile 5s 超时，非仓库静默跳过）；幂等骑 saveWithDedupe 的 (type,title,scope) 去重 + `_overwrite` 原地刷新，重跑零重复行，产物 source='bootstrap'；standalone API 新增 POST /bootstrap（Bearer 门内，dir 显式必填）。
+- **注入截断上限可配 + 截断不再静默（#164①，PR #225）**：`injectContentMaxChars`（默认 300=既有行为，60–4000 可调）+ 面板整数档；截断尾部带提示——上限/原长/全文 `memory_get` 指引（BUDGET_EXCEEDED 原则，agent 永远拿得到取全文的路径），双语；块预算 `Math.max(1500, 上限+600)` 随上限放大，调大单条上限不被旧 1500 闸卡死；`_full_content` 压缩注入路径保持逐字不加提示，短正文零变化。
+- **dream 总览升级常驻状态条——状态叙述 + 快照口径脚注（#164 对齐，PR #227）**：dreamSummary prompt 由泛化总览改为「当前状态」叙述（在做什么/最近变化/明显走向，只陈述有据事实），作为唯一常驻注入的 summary tier 0；内容尾部带快照口径脚注（整理后条数 + run 片段 + 日期），常驻答案的生成口径永远可查；`_overwrite` supersede 语义与标题不变（dedupe 键稳定，跨版本平滑）。
+- **叙述条——按主题合成叙述 + evidence 证据链（#164 对齐，PR #228）**：`dreamNarrativeEnabled`（默认 false，白名单 + lightMode 强制关）+ `dreamNarrativeMinCluster`（2–20，默认 3）；`src/dream/narratives.js` 纯函数 clusterByTag（共享 tag 主题簇，≥K 门槛、降序、cap 3/轮）+ intersectEvidence（模型 evidence 与簇成员求交，捏造 id 剔除、交空回落全簇）；dream 新增 generateNarratives 阶段单次 LLM 调用按簇合成叙述（source=narrative、`_overwrite` 原地刷新、标题=叙述：<tag> 确定性键跨 run 稳定），失败降级零条不反噬主流程；store 新增 memories.evidence JSON 列（幂等迁移）；注入候选排除 source=narrative（按需检索，常驻位只留 dream 总览）。
+- **路由旧值显式标记 + 行级提示与测试说明（issue #191，PR #213）**：巩固/睡眠/实体抽取的级联下拉刻意保留不在列表里的旧值（不静默丢配置），但此前与正常选项无差别展示——切 Provider 后残留的旧 model id 照常保存，分不清「改错了」还是「还没生效」。旧值收起即带「（不在可用列表）」标记，路由行给 ⚠ 提示（改选，或点「测试连通性」当场验证；改动保存后重启 DSH 生效）；标记只在适配器列表非空时判定（防误报），旧值保留保持无条件（列表为空不静默丢已存值）；「测试连通性」接上 modelTestHint 作说明行，与结果行同槽位二选一。不新增配置键。
+
+## 🐛 修复
+
+- **连通性测试透传 reasoningEffort（issue #215，PR #216）**：面板「测试连通性」三条路由各传各的档位键（dreamReasoningEffort / sleepReasoningEffort / entityExtractionReasoning），'none'/未配置省略字段，与后端 src/api.js 同口径——此前测试按钮不发档位，sleep 无回退重试时档位被拒只能等真实 run 才暴露；服务端零改动。
+- **按事件序增量蒸馏会话窗口（PR #226）**：summarize 由「整轮转录」改为按会话事件 seq 游标增量蒸馏——只读上次成功游标之后、当前 turn/end 之前的事件；解析失败 / 流失败 / 中止不推进游标，下次仍重试同一窗口；同批记忆写入收进 `service.transaction` 原子提交（第 N 条失败不残留前 N-1 条），最后一条写入 + 解析全成功才提交已消费 seq；`lastRunAt` 节流改到真正发起 LLM 调用时才占。
+- **summarize 补齐工具结果与子会话交付蒸馏（PR #232）**：tool/result 与 tool/code-dispatch 改读新消息形状（`data.message.content` 的 tool-result 块与 `data.content`，isError 判定）——旧字段废弃后工具结果一度静默消失、pitfall 根因蒸馏断供；新增子会话交付蒸馏（agent-message / subagent-settled / agent/inbox/spliced 三类消息去重进入转录），agent 委派结果不再只进工具槽；空数组语义收紧——模型明确判断无内容（合法空数组）才消费窗口，非空但全部无效不推进 seq 游标。
+
+## 🏗️ 工程
+
+- **复杂度自查收尾——实体召回与冷启动 5 处瘦身（PR #224）**：对 #222/#223 diff 的过度设计自查落地——bootstrap SKIP 集合去掉 .v2c、readHead 删无人覆盖的 limit 参数；findEntitiesMentionedIn 去掉等于默认值的实参、fuseRecall 删唯一调用方恒传的 entity/we 默认值、we 并入 wb（实体轴与 BM25 共用 0.3 回填权重，等 #217 数据说话再议独立权重）。
+- 测试 1160 项全绿（较 0.8.3 新增 81 项：MCP stdio 帧级 / 实体召回 / 冷启动 / 注入截断 / 增量蒸馏 / 叙述条 / 常驻状态条 / 复用统计 / heat 广义指数 / 极简模式注入状态）。
 
 ## [0.8.3] - 2026-09-17
 
