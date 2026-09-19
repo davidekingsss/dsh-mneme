@@ -232,7 +232,12 @@ async function streamText(ctx, options, onUsage, onStreamError) {
   let text = "";
   for await (const chunk of ctx.llm.stream(options)) {
     if (chunk.type === "text-delta" && typeof chunk.text === "string") text += chunk.text;
-    if (chunk.type === "usage" && typeof onUsage === "function") onUsage(chunk);
+    // 宿主协议把 token 数嵌在 chunk.usage 里（dsh-llm-deepseek 发
+    // { type:"usage", usage:{ inputTokens, outputTokens, totalTokens? } }）。
+    // 早期实现把整个 chunk 交给上报器、又从 chunk 根读字段 → 恒为 undefined
+    // → 审计 token 列全落 0（面板「LLM 消耗」永远显示 0）。这里透传嵌套对象，
+    // 保留根级回退以兼容测试桩与协议演进。
+    if (chunk.type === "usage" && typeof onUsage === "function") onUsage(chunk.usage ?? chunk);
     if (chunk.type === "finish" && (chunk.reason?.kind === "error" || chunk.reason?.kind === "aborted")) {
       // dsh-llm rc.1 turns adapter-stage failures (unknown provider route,
       // UNSUPPORTED_REASONING_EFFORT from resolveCallWithInfo, …) into a

@@ -385,8 +385,11 @@ export function createSummarizer(ctx, service, config) {
                 text += chunk.text ?? chunk.delta ?? "";
               }
               if (chunk.type === "usage" && audit) {
-                const i = chunk.input_tokens ?? chunk.inputTokens ?? chunk.prompt_tokens ?? chunk.promptTokens;
-                const o = chunk.output_tokens ?? chunk.outputTokens ?? chunk.completion_tokens ?? chunk.completionTokens;
+                // 宿主协议：token 嵌在 chunk.usage（同 dream.js streamText 的说明）；
+                // 根级字段名保留为回退，兼容测试桩与协议演进。
+                const u = chunk.usage ?? chunk;
+                const i = u.inputTokens ?? u.input_tokens ?? u.promptTokens ?? u.prompt_tokens;
+                const o = u.outputTokens ?? u.output_tokens ?? u.completionTokens ?? u.completion_tokens;
                 if (Number.isFinite(i)) audit.inputTokens = i;
                 if (Number.isFinite(o)) audit.outputTokens = o;
               }

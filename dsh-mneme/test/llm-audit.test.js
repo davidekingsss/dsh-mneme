@@ -7,7 +7,7 @@ import { createDreamScheduler } from "../src/dream.js";
 import { createSummarizer } from "../src/summarize.js";
 import { createApi } from "../src/api.js";
 import { createSettings } from "../src/settings.js";
-import { mockCtx } from "./helpers/dream-mock.js";
+import { mockCtx, MOCK_USAGE } from "./helpers/dream-mock.js";
 
 // Bug8: LLM audit trail. Every background LLM call (autoDream consolidation +
 // summary, autoSummarize compression) records tokens/time/status into
@@ -57,7 +57,15 @@ test("autoDream writes llm_audit_logs rows for consolidation and summary", async
   assert.equal(summarize.model_id, "deepseek:deepseek-chat");
   assert.ok(Array.isArray(consolidate.related_memory_ids) && consolidate.related_memory_ids.length === 2,
     "consolidation audit records the snapshot ids");
-  assert.ok(consolidate.total_tokens >= 0 && summarize.total_tokens >= 0);
+  // token 必须是真数字：宿主把 usage 嵌在 chunk.usage 里，早先读取端从 chunk
+  // 根取字段 → 恒为 undefined → 每一行都落 0，而这里曾写 `>= 0` 的恒真断言，
+  // 让「面板 LLM 消耗永远显示 0」一路溜过测试。
+  assert.equal(consolidate.input_tokens, MOCK_USAGE.consolidate.inputTokens);
+  assert.equal(consolidate.output_tokens, MOCK_USAGE.consolidate.outputTokens);
+  assert.equal(consolidate.total_tokens, MOCK_USAGE.consolidate.inputTokens + MOCK_USAGE.consolidate.outputTokens);
+  assert.equal(summarize.input_tokens, MOCK_USAGE.summary.inputTokens);
+  assert.equal(summarize.output_tokens, MOCK_USAGE.summary.outputTokens);
+  assert.equal(summarize.total_tokens, MOCK_USAGE.summary.inputTokens + MOCK_USAGE.summary.outputTokens);
   assert.ok(typeof consolidate.duration_ms === "number" && consolidate.duration_ms >= 0);
   store.close();
 });
@@ -165,6 +173,8 @@ test("autoSummarize writes an llm_audit_logs row (trigger_source autoSummarize)"
         yield { type: "text-delta", index: 0, text: JSON.stringify([
           { type: "decision", title: "选型", content: "确定用 node:sqlite", importance: 4 }
         ]) };
+        // 宿主协议形状：token 嵌在 chunk.usage（summarize.js 读取端的回归锁）
+        yield { type: "usage", usage: { inputTokens: 11, outputTokens: 4 } };
         yield { type: "finish", reason: { kind: "stop" } };
       }
     }
@@ -192,6 +202,10 @@ test("autoSummarize writes an llm_audit_logs row (trigger_source autoSummarize)"
   assert.equal(rows[0].operation_type, "summarize_compress");
   assert.equal(rows[0].model_id, "deepseek:deepseek-chat");
   assert.equal(rows[0].status, "success");
+  // autoSummarize 走的是 summarize.js 里另一处 usage 读取端——同一 bug 的第二现场
+  assert.equal(rows[0].input_tokens, 11, "usage 嵌在 chunk.usage，从 chunk 根读会恒为 0");
+  assert.equal(rows[0].output_tokens, 4);
+  assert.equal(rows[0].total_tokens, 15);
   store.close();
 });
 
@@ -305,5 +319,48 @@ test("GET /api/dsh-mneme/semantic/llm-audit/stats aggregates by source and statu
   assert.equal(bySource.total_tokens, 180);
   const errStatus = stats.by_status.find((s) => s.status === "error");
   assert.equal(errStatus.c, 1);
+  store.close();
+});
+
+// --- token 捕获的边界语义（「LLM 消耗恒为 0」的回归面）-----------------------
+
+test("usage chunk 缺失时 token 留 0：未知不是错误，也不该崩", async () => {
+  const { store, service, config } = dreamSetup();
+  service.saveWithDedupe({ type: "project", title: "旧1", content: "内容一" });
+  const ctx = mockCtx({ usage: null, onConsolidation: () => "[]" });
+  const dream = createDreamScheduler({ thresholdCount: 1, thresholdChars: 0, delayMs: 0 });
+  await dream.runDream(ctx, service, config);
+  const rows = service.listLlmAudits();
+  assert.ok(rows.length >= 1, "至少写下巩固那一行");
+  for (const row of rows) {
+    assert.equal(row.input_tokens, 0);
+    assert.equal(row.output_tokens, 0);
+    assert.equal(row.total_tokens, 0);
+  }
+  store.close();
+});
+
+test("根级 usage 数字仍被兼容（协议演进回退路径）", async () => {
+  const { store, service, config } = dreamSetup();
+  service.saveWithDedupe({ type: "project", title: "旧1", content: "内容一" });
+  // 手写 ctx：数字直接挂在 chunk 根（没有嵌套 usage 对象）——保留这条回退是为了
+  // 不让测试桩或协议演进把审计打断，注意它命中的是 snake_case 那组别名。
+  const ctx = {
+    logger: { warn: () => {} },
+    agentDefaultModel: { currentSelection: () => ({ provider: "mock", model: "stress-model" }) },
+    llm: {
+      async *stream() {
+        yield { type: "text-delta", index: 0, text: "[]" };
+        yield { type: "usage", input_tokens: 9, output_tokens: 3 };
+        yield { type: "finish", reason: { kind: "stop" } };
+      }
+    }
+  };
+  const dream = createDreamScheduler({ thresholdCount: 1, thresholdChars: 0, delayMs: 0 });
+  await dream.runDream(ctx, service, config);
+  const rows = service.listLlmAudits();
+  assert.ok(rows.length >= 1);
+  assert.equal(rows[0].input_tokens, 9);
+  assert.equal(rows[0].output_tokens, 3);
   store.close();
 });

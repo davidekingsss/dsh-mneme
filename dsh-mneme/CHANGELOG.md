@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## 🐛 修复
+
+- **状态页「LLM 消耗」恒为 0：审计读取端取错了层级**：宿主 `dsh-llm` 的流式协议把用量嵌在 `chunk.usage` 里（`{ type: "usage", usage: { inputTokens, outputTokens, totalTokens? } }`），而 `dream.js` 的 `streamText` 把整个 chunk 交给上报器、`summarize.js` 也从 chunk 根取字段——两条读取端都拿到 `undefined`、`Number.isFinite()` 判假后保持初值 0，于是每一次后台调用的 `llm_audit_logs` 行 token 全落 0（实测样本 235 行、非零 0 行），这张卡自上线起就只会显示 0。修复：读取端优先取 `chunk.usage`，并保留根级字段名回退以兼容协议演进与既有桩。测试同步补上真实协议形状的 usage chunk 与精确数值断言——原先桩完全不发 usage chunk、断言又写成 `total_tokens >= 0` 的恒真式，`dream.test.js` 更把「恒为 0」钉成了预期行为，两处一并纠正。
+
 ## 🆕 新增
 
 - **面板标注「极简模式下注入按宿主设计关闭」（issue #182）**：`GET /api/dsh-mneme/inject-status`（只读）返回 `{autoInject, agentPreset, suppressed}`——preset 探测走 `session/event` 钩子记最近会话头（注入回调在 minimal 下被宿主整体压制，#175 定论，不能作检测源；读法与 scope.js 同源），`suppressed` 需同时满足 autoInject 生效值开启 + 观测到 `agentPreset === "minimal"`；面板状态页在 suppressed 时渲染提示卡（含解法：标准模式 / `agent-presets.default: standard` / AGENTS.md 过渡），standard 会话与 preset 未知的宿主零渲染零打扰。不新增配置键。

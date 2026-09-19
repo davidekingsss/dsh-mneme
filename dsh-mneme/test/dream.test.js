@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { validateDecisions, applyDecisions, createDreamScheduler } from "../src/dream.js";
 import { createStore } from "../src/store.js";
 import { createService } from "../src/service.js";
-import { mockCtx } from "./helpers/dream-mock.js";
+import { mockCtx, MOCK_USAGE } from "./helpers/dream-mock.js";
 
 function snapshot(ids, type = "project") {
   return new Map(ids.map((id, i) => [id, { id, type, title: `t${i}`, content: `c${i}`, importance: 3, archived: false, forgotten: false }]));
@@ -964,8 +964,12 @@ test("Bug8: runDream records llm_audit_logs rows for consolidation and summary",
     assert.equal(row.status, "success");
     assert.equal(row.model_id, "deepseek:deepseek-chat", "config-first route (Issue #25): dreamProvider/dreamModel wins");
     assert.ok(Number.isInteger(row.duration_ms) && row.duration_ms >= 0, "duration recorded");
-    assert.equal(row.input_tokens, 0);
-    assert.equal(row.output_tokens, 0);
+    // 宿主协议把 token 嵌在 chunk.usage（见 dream.js streamText 注释）。这里曾
+    // 断言恒为 0——那是把「读取端读错层级」的 bug 当成了预期行为。
+    const expected = row.operation_type === "dream_consolidate" ? MOCK_USAGE.consolidate : MOCK_USAGE.summary;
+    assert.equal(row.input_tokens, expected.inputTokens);
+    assert.equal(row.output_tokens, expected.outputTokens);
+    assert.equal(row.total_tokens, expected.inputTokens + expected.outputTokens);
   }
   store.close();
 });

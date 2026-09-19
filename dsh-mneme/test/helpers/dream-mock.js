@@ -60,20 +60,42 @@ export function arbitrationDecisions(listText) {
 }
 
 /**
- * 最小 DSH ctx：consolidation 用 onConsolidation(listText) 产出决策，
- * summary 返回固定文本。
+ * 确定性 usage 数值（固定值便于断言）。已实测的宿主协议是 usage 嵌在
+ * chunk.usage 里、字段名 inputTokens/outputTokens（dsh-llm-deepseek 发
+ * `{ type:"usage", usage:{ inputTokens, outputTokens, totalTokens? } }`）。
+ * 早期桩完全不发 usage chunk，加上断言写成 `total_tokens >= 0` 的恒真式，
+ * 使得「审计 token 恒为 0」这个 bug 一路溜过测试。
  */
-export function mockCtx({ onConsolidation, summaryText = "记忆库总览：用户偏好中文；关键决策已巩固。" } = {}) {
+export const MOCK_USAGE = {
+  consolidate: { inputTokens: 1200, outputTokens: 60 },
+  summary: { inputTokens: 800, outputTokens: 40 }
+};
+
+/**
+ * 最小 DSH ctx：consolidation 用 onConsolidation(listText) 产出决策，
+ * summary 返回固定文本。每次调用都会发一个 usage chunk（协议同宿主）；
+ * 传 usage: null 可关闭（用于断言「没有 usage 时留 0」的语义）。
+ */
+export function mockCtx({ onConsolidation, summaryText = "记忆库总览：用户偏好中文；关键决策已巩固。", usage } = {}) {
   return {
     logger: { warn: () => {} },
     agentDefaultModel: { currentSelection: () => ({ provider: "mock", model: "stress-model" }) },
     llm: {
       async *stream(options) {
         const userText = options.messages.find((m) => m.role === "user")?.content?.[0]?.text ?? "";
-        if (userText.startsWith("id=")) {
-          yield { type: "text-delta", index: 0, text: onConsolidation ? onConsolidation(userText) : "[]" };
-        } else {
-          yield { type: "text-delta", index: 0, text: summaryText };
+        const isConsolidation = userText.startsWith("id=");
+        const text = isConsolidation
+          ? (onConsolidation ? onConsolidation(userText) : "[]")
+          : summaryText;
+        yield { type: "text-delta", index: 0, text };
+        const picked = usage === undefined
+          ? (isConsolidation ? MOCK_USAGE.consolidate : MOCK_USAGE.summary)
+          : (typeof usage === "function" ? usage({ userText, text, isConsolidation }) : usage);
+        if (picked) {
+          yield {
+            type: "usage",
+            usage: { ...picked, totalTokens: picked.totalTokens ?? picked.inputTokens + picked.outputTokens }
+          };
         }
         yield { type: "finish", reason: { kind: "stop" } };
       }
